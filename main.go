@@ -5,7 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,35 +21,24 @@ import (
 const NumWorkers = 3
 
 var ipRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-
 var knownBots = []string{
-	// Search Engines
 	"Googlebot", "bingbot", "YandexBot", "Baiduspider", "Slurp", "DuckDuckBot", "Sogou",
-	
-	// AI & LLM
 	"GPTBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai", "PerplexityBot", "Applebot-Extended", "Omgilibot", "Bytespider",
-	
-	// SEO & Analytics
 	"AhrefsBot", "SemrushBot", "DotBot", "MJ12bot", "Rogerbot", "Screaming Frog",
-	
-	// Social Media & Previews
 	"facebookexternalhit", "FacebookBot", "Twitterbot", "WhatsApp", "TelegramBot", "Discordbot", "LinkedInBot",
-	
-	// Monitors
 	"Pingdom", "UptimeRobot", "PetalBot",
 }
 
-// Struktur untuk menyimpan rekam jejak per IP
 type IPStats struct {
 	IP        string
 	BotType   string
 	HitCount  int
 	FirstSeen time.Time
 	LastSeen  time.Time
+	AlertSent bool // Anti-spam: Penanda apakah IP ini sudah dilaporkan ke Telegram
 }
 
-// sync.Map aman untuk concurency (Goroutines)
-var intelligenceStore sync.Map 
+var intelligenceStore sync.Map
 
 func main() {
 	fmt.Println("[SYSTEM] Memulai Mesin Intelijen Bot Analyzer...")
@@ -58,23 +51,20 @@ func main() {
 	logJobChannel := make(chan string, 1000)
 	var wg sync.WaitGroup
 
-	// Menjalankan Worker
 	for w := 1; w <= NumWorkers; w++ {
 		wg.Add(1)
 		go workerAnalyzer(w, logJobChannel, &wg)
 	}
 
-	// TUGAS: Ganti dengan ID/Nama container Anda yang benar
+	// TUGAS: Pastikan nama container ini sudah benar sesuai di Coolify
 	targetContainer := "dpao7nun1z42116m98f06sy8-164825490843"
 	go streamContainerLogs(cli, targetContainer, logJobChannel)
 
-	// Menjalankan Goroutine Pelapor (Reporter)
 	go reportGenerator()
 
 	select {}
 }
 
-// --- FUNGSI STREAM ---
 func streamContainerLogs(cli *client.Client, containerID string, jobs chan<- string) {
 	ctx := context.Background()
 	options := container.LogsOptions{
@@ -94,17 +84,12 @@ func streamContainerLogs(cli *client.Client, containerID string, jobs chan<- str
 	}
 }
 
-// --- FUNGSI WORKER (PENGUMPUL DATA) ---
 func workerAnalyzer(id int, jobs <-chan string, wg *sync.WaitGroup) {
 	defer wg.Done()
-
 	for logLine := range jobs {
 		cleanLog := sanitizeDockerLog(logLine)
-
 		ipMatch := ipRegex.FindString(cleanLog)
-		if ipMatch == "" {
-			continue 
-		}
+		if ipMatch == "" { continue }
 
 		botDetected := "Unknown/Human"
 		lowerLog := strings.ToLower(cleanLog)
@@ -115,26 +100,22 @@ func workerAnalyzer(id int, jobs <-chan string, wg *sync.WaitGroup) {
 			}
 		}
 
-		// Jika itu bot, kita masukkan ke dalam "Ingatan" (Store)
 		if botDetected != "Unknown/Human" {
 			now := time.Now()
-			
-			// Cek apakah IP ini sudah ada di database memori kita
 			val, exists := intelligenceStore.Load(ipMatch)
 			if exists {
-				// Jika ada, update jumlah Hit dan Waktu Terakhir
 				stats := val.(IPStats)
 				stats.HitCount++
 				stats.LastSeen = now
 				intelligenceStore.Store(ipMatch, stats)
 			} else {
-				// Jika IP baru, buat rekaman baru
 				intelligenceStore.Store(ipMatch, IPStats{
 					IP:        ipMatch,
 					BotType:   strings.ToUpper(botDetected),
 					HitCount:  1,
 					FirstSeen: now,
 					LastSeen:  now,
+					AlertSent: false,
 				})
 			}
 		}
@@ -146,11 +127,45 @@ func sanitizeDockerLog(raw string) string {
 	return raw
 }
 
-// --- FUNGSI REPORTER (ANALISIS BERKALA) ---
+// --- FUNGSI PENGIRIM TELEGRAM ---
+func sendTelegramAlert(botType, ip string, hitCount int, rps float64) {
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	
+	if token == "" || chatID == "" {
+		fmt.Println("[WARNING] Token atau Chat ID Telegram belum diatur. Notifikasi dibatalkan.")
+		return
+	}
+
+	// Format Pesan Markdown
+	pesan := fmt.Sprintf("🚨 *ANOMALI BOT TERDETEKSI* 🚨\n\n🤖 *Bot:* %s\n🌐 *IP:* `%s`\n📈 *Total Hit:* %d\n⚡ *Kecepatan:* %.2f request/detik\n\n_Sistem memantau beban trafik yang tidak wajar dari IP ini. Segera cek server Anda._", botType, ip, hitCount, rps)
+
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	resp, err := http.PostForm(apiURL, url.Values{
+		"chat_id":    {chatID},
+		"text":       {pesan},
+		"parse_mode": {"Markdown"},
+	})
+	
+	if err != nil {
+		fmt.Printf("[TELEGRAM ERROR] Gagal mengirim pesan: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	
+	fmt.Printf("[TELEGRAM SUCCESS] Notifikasi anomali %s (%s) terkirim!\n", botType, ip)
+}
+
 func reportGenerator() {
-	// Buat loop yang melaporkan hasil setiap 15 detik
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+
+	// Mengambil nilai threshold dari Coolify (default: 10 RPS jika tidak diatur)
+	thresholdStr := os.Getenv("ALERT_RPS_THRESHOLD")
+	alertThreshold := 10.0 
+	if t, err := strconv.ParseFloat(thresholdStr, 64); err == nil {
+		alertThreshold = t
+	}
 
 	for range ticker.C {
 		fmt.Println("\n===================================================")
@@ -159,27 +174,31 @@ func reportGenerator() {
 		
 		totalBots := 0
 		
-		// Membaca isi memory
 		intelligenceStore.Range(func(key, value interface{}) bool {
 			stats := value.(IPStats)
 			totalBots++
 			
-			// Hitung durasi aktivitas
 			duration := stats.LastSeen.Sub(stats.FirstSeen).Round(time.Second)
-			if duration == 0 { duration = 1 * time.Second } // Mencegah 0 detik
+			if duration == 0 { duration = 1 * time.Second }
 			
-			// Hitung agresi (Request per detik)
 			rps := float64(stats.HitCount) / duration.Seconds()
 
-			fmt.Printf("🤖 %-12s | IP: %-15s | Total Hit: %-4d | RPS: %.2f hit/dtk\n", 
-				stats.BotType, stats.IP, stats.HitCount, rps)
+			fmt.Printf("🤖 %-12s | IP: %-15s | Hit: %-4d | RPS: %.2f\n", stats.BotType, stats.IP, stats.HitCount, rps)
 			
-			return true // Lanjut iterasi
+			// LOGIKA TRIGGER TELEGRAM
+			if rps >= alertThreshold && !stats.AlertSent {
+				// Jalankan pengiriman di background agar tidak memblokir laporan
+				go sendTelegramAlert(stats.BotType, stats.IP, stats.HitCount, rps)
+				
+				// Tandai bahwa IP ini sudah dilaporkan agar tidak spam
+				stats.AlertSent = true
+				intelligenceStore.Store(key, stats)
+			}
+			
+			return true 
 		})
 
-		if totalBots == 0 {
-			fmt.Println("Tidak ada pergerakan bot yang terdeteksi.")
-		}
+		if totalBots == 0 { fmt.Println("Tidak ada pergerakan bot yang terdeteksi.") }
 		fmt.Println("===================================================\n")
 	}
 }

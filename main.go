@@ -17,7 +17,23 @@ import (
 const NumWorkers = 3
 
 var ipRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-var knownBots = []string{"Googlebot", "bingbot", "YandexBot", "Baiduspider", "AhrefsBot", "SemrushBot", "ClaudeBot"}
+// Daftar bot komprehensif
+var knownBots = []string{
+	// Search Engines
+	"Googlebot", "bingbot", "YandexBot", "Baiduspider", "Slurp", "DuckDuckBot", "Sogou",
+	
+	// AI & LLM
+	"GPTBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai", "PerplexityBot", "Applebot-Extended", "Omgilibot", "Bytespider",
+	
+	// SEO & Analytics
+	"AhrefsBot", "SemrushBot", "DotBot", "MJ12bot", "Rogerbot", "Screaming Frog",
+	
+	// Social Media & Previews
+	"facebookexternalhit", "FacebookBot", "Twitterbot", "WhatsApp", "TelegramBot", "Discordbot", "LinkedInBot",
+	
+	// Monitors
+	"Pingdom", "UptimeRobot", "PetalBot",
+}
 
 // Struktur untuk menyimpan rekam jejak per IP
 type IPStats struct {

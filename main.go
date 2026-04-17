@@ -17,7 +17,7 @@ import (
 const NumWorkers = 3
 
 var ipRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-// Daftar bot komprehensif
+
 var knownBots = []string{
 	// Search Engines
 	"Googlebot", "bingbot", "YandexBot", "Baiduspider", "Slurp", "DuckDuckBot", "Sogou",

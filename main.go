@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// TUGAS: Pastikan nama container sesuai dengan target Anda
-	targetContainer := "NAMA_ATAU_ID_CONTAINER_BOT_ANDA"
+	targetContainer := "dpao7nun1z42116m98f06sy8-164825490843"
 	go streamContainerLogs(cli, targetContainer, logJobChannel)
 
 	// 4. Jalankan Mesin Pelapor & Sinkronisasi DB

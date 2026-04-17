@@ -2,7 +2,10 @@ module bot-log-analyzer
 
 go 1.25.4
 
-require github.com/docker/docker v26.1.3+incompatible
+require (
+	github.com/docker/docker v26.1.3+incompatible
+	github.com/lib/pq v1.12.3
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect

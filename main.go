@@ -24,11 +24,27 @@ const NumWorkers = 3
 
 var ipRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 var knownBots = []string{
+	// Search Engine & Crawler Standar
 	"Googlebot", "bingbot", "YandexBot", "Baiduspider", "Slurp", "DuckDuckBot", "Sogou",
+	
+	// Bot AI Raksasa
 	"GPTBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai", "PerplexityBot", "Applebot-Extended", "Omgilibot", "Bytespider",
+	
+	// SEO & Analytics Tools
 	"AhrefsBot", "SemrushBot", "DotBot", "MJ12bot", "Rogerbot", "Screaming Frog",
+	
+	// Social Media & Uptime Monitor
 	"facebookexternalhit", "FacebookBot", "Twitterbot", "WhatsApp", "TelegramBot", "Discordbot", "LinkedInBot",
 	"Pingdom", "UptimeRobot", "PetalBot",
+
+	// --- TAMBAHAN BARU: Senjata Scraper Perorangan ---
+	"python", "aiohttp", "requests", "urllib",  // Ekosistem Python
+	"curl", "wget", "libcurl",                  // Command Line Tools
+	"go-http-client",                           // Script Golang
+	"java", "apache-httpclient",                // Ekosistem Java
+	"node-fetch", "axios",                      // Ekosistem JavaScript/Node.js
+	"libwww-perl",                              // Script Perl Lama
+	"scrapy", "puppeteer", "selenium",          // Framework Scraping Khusus
 }
 
 type IPStats struct {

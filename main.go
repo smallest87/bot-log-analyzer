@@ -1,3 +1,16 @@
+Sistem intelijen Anda sudah terstruktur dengan sangat baik. Penggunaan *Goroutine* dan *Channel* untuk memproses *log* secara paralel (*Worker Pool*) adalah tanda bahwa kode ini ditulis dengan standar *production*.
+
+Saya telah merombak kode Anda untuk mengimplementasikan **Analisis 2 Dimensi (IP vs User-Agent)**. 
+
+Berikut adalah perubahannya:
+1. Menambahkan *package* `"net"`.
+2. Memecah `knownBots` menjadi `standardBots` dan `scraperKeywords` agar kita bisa memberikan label khusus untuk penyerang.
+3. Menambahkan fungsi `isPrivateIP()`.
+4. Merombak logika di dalam `workerAnalyzer`.
+
+Silakan timpa seluruh isi *file* `main.go` Anda dengan kode final di bawah ini:
+
+```go
 package main
 
 import (
@@ -6,6 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,28 +37,25 @@ import (
 const NumWorkers = 3
 
 var ipRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-var knownBots = []string{
-	// Search Engine & Crawler Standar
+
+// 1. Pisahkan daftar bot standar
+var standardBots = []string{
 	"Googlebot", "bingbot", "YandexBot", "Baiduspider", "Slurp", "DuckDuckBot", "Sogou",
-	
-	// Bot AI Raksasa
 	"GPTBot", "ChatGPT-User", "ClaudeBot", "anthropic-ai", "PerplexityBot", "Applebot-Extended", "Omgilibot", "Bytespider",
-	
-	// SEO & Analytics Tools
 	"AhrefsBot", "SemrushBot", "DotBot", "MJ12bot", "Rogerbot", "Screaming Frog",
-	
-	// Social Media & Uptime Monitor
 	"facebookexternalhit", "FacebookBot", "Twitterbot", "WhatsApp", "TelegramBot", "Discordbot", "LinkedInBot",
 	"Pingdom", "UptimeRobot", "PetalBot",
+}
 
-	// --- TAMBAHAN BARU: Senjata Scraper Perorangan ---
-	"python", "aiohttp", "requests", "urllib",  // Ekosistem Python
-	"curl", "wget", "libcurl",                  // Command Line Tools
-	"go-http-client",                           // Script Golang
-	"java", "apache-httpclient",                // Ekosistem Java
-	"node-fetch", "axios",                      // Ekosistem JavaScript/Node.js
-	"libwww-perl",                              // Script Perl Lama
-	"scrapy", "puppeteer", "selenium",          // Framework Scraping Khusus
+// 2. Pisahkan daftar senjata scraper untuk pelabelan khusus
+var scraperKeywords = []string{
+	"python", "aiohttp", "requests", "urllib",
+	"curl", "wget", "libcurl",
+	"go-http-client",
+	"java", "apache-httpclient",
+	"node-fetch", "axios",
+	"libwww-perl",
+	"scrapy", "puppeteer", "selenium",
 }
 
 type IPStats struct {
@@ -57,15 +68,13 @@ type IPStats struct {
 }
 
 var intelligenceStore sync.Map
-var db *sql.DB // Variabel global untuk koneksi Database
+var db *sql.DB
 
 func main() {
 	fmt.Println("[SYSTEM] Memulai Mesin Intelijen Bot Analyzer (Dengan Integrasi DB)...")
 
-	// 1. Inisialisasi Database
 	initDatabase()
 
-	// 2. Inisialisasi Docker Client
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Fatalf("FATAL: Gagal inisialisasi Docker client: %v", err)
@@ -74,20 +83,29 @@ func main() {
 	logJobChannel := make(chan string, 1000)
 	var wg sync.WaitGroup
 
-	// 3. Jalankan Worker Pool
 	for w := 1; w <= NumWorkers; w++ {
 		wg.Add(1)
 		go workerAnalyzer(w, logJobChannel, &wg)
 	}
 
-	// TUGAS: Pastikan nama container sesuai dengan target Anda
 	targetContainer := "dpao7nun1z42116m98f06sy8-164825490843"
 	go streamContainerLogs(cli, targetContainer, logJobChannel)
 
-	// 4. Jalankan Mesin Pelapor & Sinkronisasi DB
 	go reportAndSyncDB()
 
 	select {}
+}
+
+// ==========================================
+// FUNGSI PENGECEKAN IP (BARU)
+// ==========================================
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	// Mengamankan 10.x.x.x, 172.16.x.x, 192.168.x.x dan 127.0.0.1
+	return ip.IsPrivate() || ip.IsLoopback()
 }
 
 // ==========================================
@@ -106,14 +124,12 @@ func initDatabase() {
 		log.Fatalf("FATAL: Gagal membuka koneksi database: %v", err)
 	}
 
-	// Tes Koneksi
 	if err = db.Ping(); err != nil {
 		log.Fatalf("FATAL: Tidak dapat melakukan ping ke database: %v", err)
 	}
 
 	fmt.Println("[DB SUCCESS] Berhasil terhubung ke PostgreSQL!")
 
-	// Membuat tabel otomatis jika belum ada
 	createTableQuery := `
 	CREATE TABLE IF NOT EXISTS bot_analytics (
 		ip VARCHAR(50) PRIMARY KEY,
@@ -132,10 +148,9 @@ func initDatabase() {
 
 func syncToDatabase(stats IPStats) {
 	if db == nil {
-		return // Abaikan jika DB tidak dikonfigurasi
+		return
 	}
 
-	// Operasi UPSERT (Update if exists, Insert if new)
 	query := `
 		INSERT INTO bot_analytics (ip, bot_type, hit_count, first_seen, last_seen) 
 		VALUES ($1, $2, $3, $4, $5) 
@@ -180,16 +195,38 @@ func workerAnalyzer(id int, jobs <-chan string, wg *sync.WaitGroup) {
 
 		botDetected := "Unknown/Human"
 		lowerLog := strings.ToLower(cleanLog)
-		for _, bot := range knownBots {
-			if strings.Contains(lowerLog, strings.ToLower(bot)) {
-				botDetected = bot
-				break
+
+		// LOGIKA 2 DIMENSI DIMULAI DI SINI
+		if isPrivateIP(ipMatch) {
+			botDetected = "System (Internal)"
+		} else {
+			// Cek bot standar terlebih dahulu
+			for _, bot := range standardBots {
+				if strings.Contains(lowerLog, strings.ToLower(bot)) {
+					botDetected = bot
+					break
+				}
+			}
+
+			// Jika bukan bot standar, cek apakah menggunakan tool scraper
+			if botDetected == "Unknown/Human" {
+				for _, keyword := range scraperKeywords {
+					if strings.Contains(lowerLog, keyword) {
+						botDetected = "Scanner (" + keyword + ")"
+						break
+					}
+				}
 			}
 		}
 
+		// Proses penyimpanan state
 		if botDetected != "Unknown/Human" {
 			now := time.Now()
 			val, exists := intelligenceStore.Load(ipMatch)
+			
+			// Jika label sudah pernah terekam, kita tetap gunakan uppercase
+			finalLabel := strings.ToUpper(botDetected)
+
 			if exists {
 				stats := val.(IPStats)
 				stats.HitCount++
@@ -198,7 +235,7 @@ func workerAnalyzer(id int, jobs <-chan string, wg *sync.WaitGroup) {
 			} else {
 				intelligenceStore.Store(ipMatch, IPStats{
 					IP:        ipMatch,
-					BotType:   strings.ToUpper(botDetected),
+					BotType:   finalLabel,
 					HitCount:  1,
 					FirstSeen: now,
 					LastSeen:  now,
@@ -251,12 +288,10 @@ func reportAndSyncDB() {
 			if duration == 0 { duration = 1 * time.Second }
 			rps := float64(stats.HitCount) / duration.Seconds()
 
-			fmt.Printf("🤖 %-12s | IP: %-15s | Hit: %-4d | RPS: %.2f\n", stats.BotType, stats.IP, stats.HitCount, rps)
+			fmt.Printf("🤖 %-20s | IP: %-15s | Hit: %-4d | RPS: %.2f\n", stats.BotType, stats.IP, stats.HitCount, rps)
 			
-			// 1. Simpan ke Database
 			go syncToDatabase(stats)
 
-			// 2. Kirim Alert Telegram jika melebihi batas
 			if rps >= alertThreshold && !stats.AlertSent {
 				go sendTelegramAlert(stats.BotType, stats.IP, stats.HitCount, rps)
 				stats.AlertSent = true
@@ -270,3 +305,4 @@ func reportAndSyncDB() {
 		fmt.Println("===================================================\n")
 	}
 }
+```

@@ -84,7 +84,7 @@ func main() {
 	targetContainer := os.Getenv("TARGET_CONTAINER")
 	if targetContainer == "" {
 		// Nilai fallback sementara jika di .env belum diatur
-		targetContainer = "dpao7nun1z42116m98f06sy8-164825490843"
+		targetContainer = "wordpress-dzjf9uy26cyto8zg8n987ipx"
 		fmt.Println("[WARNING] TARGET_CONTAINER tidak ada di .env. Menggunakan nilai fallback.")
 	}
 
